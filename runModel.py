@@ -1,0 +1,148 @@
+# run_model.py
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
+from sklearn.metrics import make_scorer, roc_auc_score, f1_score
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from xgboost import XGBClassifier
+from sklearn.inspection import permutation_importance
+from sklearn.metrics import (
+    make_scorer, roc_auc_score, f1_score,
+    precision_recall_curve, roc_curve, auc, confusion_matrix
+)
+
+# Import preprocessor and RowCounter from pipeline
+from pipeline import preprocessor, RowCounter
+
+DATA_PATH = 'df_model.xlsx'
+RESULTS_PATH = 'model_results.csv'
+
+# ---- Models and parameter grids ----
+models = {
+    'LogisticRegression': LogisticRegression(solver='liblinear', random_state=42),
+    'RandomForest': RandomForestClassifier(random_state=42),
+    'XGBoost': XGBClassifier(use_label_encoder=False, eval_metric='logloss', random_state=42)
+}
+
+param_grids = {
+    'LogisticRegression': {'model__C': [0.1, 1.0, 10.0]},
+    'RandomForest': {'model__n_estimators': [100, 200], 'model__max_depth': [None, 5, 10]},
+    'XGBoost': {'model__n_estimators': [100, 200], 'model__learning_rate': [0.01, 0.1]}
+}
+
+# ---- TimeSeries split ----
+ts_cv = TimeSeriesSplit(n_splits=5)
+
+# Scoring metrics
+scoring = {'auc': 'roc_auc', 'f1': make_scorer(f1_score)}
+
+def plot_curves(y_true, y_prob, model_name):
+    # ROC Curve
+    fpr, tpr, _ = roc_curve(y_true, y_prob)
+    roc_auc = auc(fpr, tpr)
+    plt.figure()
+    plt.plot(fpr, tpr, label=f'ROC AUC = {roc_auc:.3f}')
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title(f'{model_name} ROC Curve')
+    plt.legend(loc='lower right')
+    plt.savefig(f'{model_name}_roc_curve.png')
+    plt.close()
+
+    # Precision-Recall Curve
+    precision, recall, _ = precision_recall_curve(y_true, y_prob)
+    pr_auc = auc(recall, precision)
+    plt.figure()
+    plt.plot(recall, precision, label=f'PR AUC = {pr_auc:.3f}')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title(f'{model_name} Precision-Recall Curve')
+    plt.legend(loc='lower left')
+    plt.savefig(f'{model_name}_pr_curve.png')
+    plt.close()
+
+
+def main():
+    # Load data
+    df = pd.read_excel(DATA_PATH, engine='openpyxl')
+    X = df.drop('success', axis=1)
+    y = df['success']
+
+    results = []
+
+    for name, estimator in models.items():
+        print(f"\n=== {name} ===")
+        pipe = Pipeline([
+            #('count_initial', RowCounter(f'{name} initial')),
+            ('preprocessor', preprocessor),
+            #('count_after', RowCounter(f'{name} after_prep')),
+            ('model', estimator)
+        ])
+
+        grid = GridSearchCV(
+            pipe,
+            param_grid=param_grids[name],
+            cv=ts_cv,
+            scoring=scoring,
+            refit='auc',
+            return_train_score=False
+        )
+        grid.fit(X, y)
+
+        # Best estimator and predictions
+        best = grid.best_estimator_
+        y_prob = best.predict_proba(X)[:, 1]
+        y_pred = best.predict(X)
+
+        # Compute metrics
+        auc_score = roc_auc_score(y, y_prob)
+        f1 = f1_score(y, y_pred)
+        cm = confusion_matrix(y, y_pred).ravel()
+        tn, fp, fn, tp = cm
+        precision = tp / (tp + fp)
+        recall = tp / (tp + fn)
+        # Precision-Recall AUC
+        precision_vals, recall_vals, _ = precision_recall_curve(y, y_prob)
+        pr_auc = auc(recall_vals, precision_vals)
+
+
+        # Plot curves
+        plot_curves(y, y_prob, name)
+
+        # Feature importance / coefficients
+        if name in ['RandomForest', 'XGBoost']:
+            perm_imp = permutation_importance(best, X, y, n_repeats=10, random_state=42)
+            feat_imp = pd.Series(perm_imp.importances_mean, index=X.columns)
+            feat_imp.sort_values(ascending=False).to_csv(f'{name}_feature_importance.csv')
+        else:  # Logistic Regression
+            coefs = pd.Series(best.named_steps['model'].coef_[0], index=X.columns)
+            coefs.sort_values(key=abs, ascending=False).to_csv(f'{name}_coefficients.csv')
+
+        # Save results
+        results.append({
+            'model': name,
+            'best_params': grid.best_params_,
+            'roc_auc': auc_score,
+            'pr_auc': pr_auc,
+            'f1': f1,
+            'precision': precision,
+            'recall': recall,
+            'tn': tn,
+            'fp': fp,
+            'fn': fn,
+            'tp': tp
+        })
+        print(f"Best AUC: {auc_score:.4f}")
+        print(f"F1 Score: {f1:.4f}")
+        print(f"Confusion Matrix: TP={tp}, TN={tn}, FP={fp}, FN={fn}")
+
+    # Export summary
+    pd.DataFrame(results).to_csv(RESULTS_PATH, index=False)
+    print(f"\nAll results saved to {RESULTS_PATH}")
+
+if __name__ == '__main__':
+    main()
