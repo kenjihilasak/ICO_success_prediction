@@ -18,14 +18,19 @@ from sklearn.metrics import (
 # Import preprocessor and RowCounter from pipeline
 from pipeline import preprocessor, RowCounter
 
+# Import custom plotting functions
+from plotUtils import plot_curves, plot_combined_roc
+
+# ---- Constants ----
 DATA_PATH = 'df_model.xlsx'
 RESULTS_PATH = 'model_results.csv'
+roc_curves = {}
 
 # ---- Models and parameter grids ----
 models = {
     'LogisticRegression': LogisticRegression(solver='liblinear', random_state=42),
     'RandomForest': RandomForestClassifier(random_state=42),
-    'XGBoost': XGBClassifier(use_label_encoder=False, eval_metric='logloss', random_state=42)
+    'XGBoost': XGBClassifier(eval_metric='logloss', verbosity=0,random_state=42)
 }
 
 param_grids = {
@@ -39,32 +44,6 @@ ts_cv = TimeSeriesSplit(n_splits=5)
 
 # Scoring metrics
 scoring = {'auc': 'roc_auc', 'f1': make_scorer(f1_score)}
-
-def plot_curves(y_true, y_prob, model_name):
-    # ROC Curve
-    fpr, tpr, _ = roc_curve(y_true, y_prob)
-    roc_auc = auc(fpr, tpr)
-    plt.figure()
-    plt.plot(fpr, tpr, label=f'ROC AUC = {roc_auc:.3f}')
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
-    plt.title(f'{model_name} ROC Curve')
-    plt.legend(loc='lower right')
-    plt.savefig(f'{model_name}_roc_curve.png')
-    plt.close()
-
-    # Precision-Recall Curve
-    precision, recall, _ = precision_recall_curve(y_true, y_prob)
-    pr_auc = auc(recall, precision)
-    plt.figure()
-    plt.plot(recall, precision, label=f'PR AUC = {pr_auc:.3f}')
-    plt.xlabel('Recall')
-    plt.ylabel('Precision')
-    plt.title(f'{model_name} Precision-Recall Curve')
-    plt.legend(loc='lower left')
-    plt.savefig(f'{model_name}_pr_curve.png')
-    plt.close()
-
 
 def main():
     # Load data
@@ -136,9 +115,18 @@ def main():
             'fn': fn,
             'tp': tp
         })
+
+        # ROC curve data for combined plot
+        fpr, tpr, _ = roc_curve(y, y_prob)
+        roc_auc = auc(fpr, tpr)
+        roc_curves[name] = (fpr, tpr, roc_auc)
+
         print(f"Best AUC: {auc_score:.4f}")
         print(f"F1 Score: {f1:.4f}")
         print(f"Confusion Matrix: TP={tp}, TN={tn}, FP={fp}, FN={fn}")
+    
+    # Plot all ROC curves together
+    plot_combined_roc(roc_curves)
 
     # Export summary
     pd.DataFrame(results).to_csv(RESULTS_PATH, index=False)
