@@ -19,7 +19,7 @@ from sklearn.metrics import (
 from pipeline import preprocessor, RowCounter
 
 # Import custom plotting functions
-from plotUtils import plot_curves, plot_combined_roc
+from plotUtils import plot_curves, plot_combined_roc, plot_feature_importance, print_confusion_matrix
 
 # ---- Constants ----
 DATA_PATH = 'df_model.xlsx'
@@ -97,9 +97,14 @@ def main():
             perm_imp = permutation_importance(best, X, y, n_repeats=10, random_state=42)
             feat_imp = pd.Series(perm_imp.importances_mean, index=X.columns)
             feat_imp.sort_values(ascending=False).to_csv(f'{name}_feature_importance.csv')
+            # Plot feature importance
+            plot_feature_importance(feat_imp, model_name=name, top_n=10)
         else:  # Logistic Regression
-            coefs = pd.Series(best.named_steps['model'].coef_[0], index=X.columns)
-            coefs.sort_values(key=abs, ascending=False).to_csv(f'{name}_coefficients.csv')
+            feat_imp = pd.Series(best.named_steps['model'].coef_[0], index=X.columns)
+            feat_imp = feat_imp.abs().sort_values(ascending=False)
+            feat_imp.to_csv(f'{name}_coefficients.csv')
+            # Plot feature importance (coefficients magnitude)
+            plot_feature_importance(feat_imp, model_name=name, top_n=10)
 
         # Save results
         results.append({
@@ -123,7 +128,7 @@ def main():
 
         print(f"Best AUC: {auc_score:.4f}")
         print(f"F1 Score: {f1:.4f}")
-        print(f"Confusion Matrix: TP={tp}, TN={tn}, FP={fp}, FN={fn}")
+        print_confusion_matrix(tp, tn, fp, fn)
     
     # Plot all ROC curves together
     plot_combined_roc(roc_curves)
