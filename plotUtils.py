@@ -64,7 +64,6 @@ def plot_feature_importance(feat_imp: pd.Series, model_name: str, top_n: int = N
     filename = save_path or f'{model_name}_feature_importance.png'
     plt.savefig(filename)
     plt.close()
-
     print(f"Saved feature importance plot: {filename}")
 
     
