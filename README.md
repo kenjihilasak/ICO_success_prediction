@@ -42,11 +42,6 @@ Install the following Python libraries to run the project:
 - `matplotlib`
 - `seaborn`
 
-You can install dependencies by running:
-
-```bash
-pip install -r requirements.txt
-```
 
 ---
 
